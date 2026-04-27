@@ -1,0 +1,34 @@
+import type { CharacteristicValue, Service } from 'homebridge';
+import type { DeviceAttributeBase } from '../core/MideaDevice.js';
+import type MideaCCDevice from '../devices/cc/MideaCCDevice.js';
+import type { MideaAccessory, MideaPlatform } from '../platform.js';
+import type { DeviceConfig } from '../platformUtils.js';
+import BaseAccessory from './BaseAccessory.js';
+export default class MDVWiFiControllerAccessory extends BaseAccessory<MideaCCDevice> {
+    protected readonly device: MideaCCDevice;
+    protected readonly configDev: DeviceConfig;
+    protected service: Service;
+    private heatingThresholdTemperature;
+    private coolingThresholdTemperature;
+    constructor(platform: MideaPlatform, accessory: MideaAccessory, device: MideaCCDevice, configDev: DeviceConfig);
+    protected updateCharacteristics(attributes: DeviceAttributeBase): Promise<void>;
+    getActive(): CharacteristicValue;
+    setActive(value: CharacteristicValue): Promise<void>;
+    getTemperatureDisplayUnits(): CharacteristicValue;
+    setTemperatureDisplayUnits(value: CharacteristicValue): Promise<void>;
+    getCurrentHeaterCoolerState(): CharacteristicValue;
+    getTargetHeaterCoolerState(): CharacteristicValue;
+    setTargetHeaterCoolerState(value: CharacteristicValue): Promise<void>;
+    getCurrentTemperature(): CharacteristicValue;
+    getTargetTemperature(): CharacteristicValue;
+    setTargetTemperature(value: CharacteristicValue): Promise<void>;
+    setTargetTemperatureWithinThresholds(): Promise<void>;
+    getCoolingThresholdTemperature(): CharacteristicValue;
+    getHeatingThresholdTemperature(): CharacteristicValue;
+    getRotationSpeed(): CharacteristicValue;
+    setRotationSpeed(value: CharacteristicValue): Promise<void>;
+    getSwingMode(): CharacteristicValue;
+    setSwingMode(_: CharacteristicValue): Promise<void>;
+    private fanSpeedToPercentage;
+    private percentageToFanSpeed;
+}

@@ -1,0 +1,245 @@
+/***********************************************************************
+ * Midea Dehumidifier Device message handler class
+ *
+ * Copyright (c) 2023 David Kerr, https://github.com/dkerr64
+ *
+ * With thanks to https://github.com/kovapatrik/homebridge-midea-platform
+ * And https://github.com/georgezhao2010/midea_ac_lan
+ *
+ */
+import { DeviceType } from '../../core/MideaConstants.js';
+import { MessageBody, MessageRequest, MessageResponse, MessageType, NewProtocolMessageBody } from '../../core/MideaMessage.js';
+import { calculate } from '../../core/MideaUtils.js';
+var NewProtocolTags;
+(function (NewProtocolTags) {
+    NewProtocolTags[NewProtocolTags["LIGHT"] = 91] = "LIGHT";
+})(NewProtocolTags || (NewProtocolTags = {}));
+class MessageA1Base extends MessageRequest {
+    static message_serial = 0;
+    message_id;
+    constructor(device_protocol_version, message_type, body_type) {
+        super(DeviceType.DEHUMIDIFIER, message_type, body_type, device_protocol_version);
+        MessageA1Base.message_serial += 1;
+        // I don't know why dehumidifier wraps at 100, air conditioner wraps at 254
+        if (MessageA1Base.message_serial >= 100) {
+            MessageA1Base.message_serial = 1;
+        }
+        this.message_id = MessageA1Base.message_serial;
+    }
+    get body() {
+        // biome-ignore lint/style/noNonNullAssertion: we know body_type cannot be null
+        let body = Buffer.concat([Buffer.from([this.body_type]), this._body, Buffer.from([this.message_id])]);
+        body = Buffer.concat([body, Buffer.from([calculate(body)])]);
+        return body;
+    }
+}
+export class MessageQuery extends MessageA1Base {
+    constructor(device_protocol_version) {
+        super(device_protocol_version, MessageType.QUERY, 0x41);
+    }
+    get _body() {
+        // biome-ignore format: easier to read
+        return Buffer.from([
+            0x81, 0x00, 0xff, 0x00,
+            0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00
+        ]);
+    }
+}
+export class MessageNewProtocolQuery extends MessageA1Base {
+    alternate_display;
+    constructor(device_protocol_version, alternate_display = false) {
+        super(device_protocol_version, MessageType.QUERY, 0xb1);
+        this.alternate_display = alternate_display;
+    }
+    get _body() {
+        const query_params = [NewProtocolTags.LIGHT];
+        let body = Buffer.from([query_params.length]);
+        for (const param of query_params) {
+            if (param) {
+                body = Buffer.concat([body, Buffer.from([param & 0xff, param >> 8])]);
+            }
+        }
+        return body;
+    }
+}
+export class MessageSet extends MessageA1Base {
+    power;
+    prompt_tone;
+    mode;
+    fan_speed;
+    child_lock;
+    target_humidity;
+    swing;
+    anion;
+    filter;
+    pump;
+    water_level_set;
+    purifier;
+    constructor(device_protocol_version) {
+        super(device_protocol_version, MessageType.SET, 0x48);
+        this.power = false;
+        this.prompt_tone = true;
+        this.mode = 1;
+        this.fan_speed = 40;
+        this.child_lock = false;
+        this.target_humidity = 40;
+        this.swing = false;
+        this.anion = false;
+        this.filter = false;
+        this.pump = false;
+        this.water_level_set = 50;
+        this.purifier = 0;
+    }
+    get _body() {
+        // byte1, power, prompt_tone
+        const power = this.power ? 0x01 : 0x00;
+        const prompt_tone = this.prompt_tone ? 0x40 : 0x00;
+        // byte2 mode
+        const mode = this.mode;
+        // byte3 fan_speed
+        const fan_speed = this.fan_speed;
+        // byte7 target_humidity
+        const target_humidity = this.target_humidity;
+        // byte8 child_lock
+        const child_lock = this.child_lock ? 0x80 : 0x00;
+        // byte9 anion, filter, pump, pump_enable
+        const anion = this.anion ? 0x40 : 0x00;
+        const filter = this.filter ? 0x80 : 0x00;
+        const pump = this.pump ? 0x08 : 0x00;
+        const pump_enable = this.pump ? 0x10 : 0x00;
+        // byte10 swing (swingUDValue << 3)
+        const swing = this.swing ? 0x08 : 0x00;
+        // byte13 water_level_set
+        const water_level_set = this.water_level_set;
+        // byte14 purifier
+        const purifier = this.purifier;
+        // biome-ignore format: easier to read
+        return Buffer.from([
+            power | prompt_tone | 0x02,
+            mode,
+            fan_speed,
+            0x00, 0x00, 0x00,
+            target_humidity,
+            child_lock,
+            anion | filter | pump | pump_enable,
+            swing,
+            0x00, 0x00,
+            water_level_set,
+            purifier,
+            0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
+        ]);
+    }
+}
+export class MessageNewProtocolSet extends MessageA1Base {
+    light = false;
+    constructor(device_protocol_version) {
+        super(device_protocol_version, MessageType.SET, 0xb0);
+    }
+    get _body() {
+        let pack_count = 0;
+        let payload = Buffer.from([0x00]);
+        if (this.light !== undefined) {
+            pack_count += 1;
+            payload = Buffer.concat([
+                payload,
+                // original python code at:
+                // https://github.com/georgezhao2010/midea_ac_lan/blob/master/custom_components/midea_ac_lan/midea/devices/a1/message.py
+                // used "NewProtocolTags.INDIRECT_WIND" but that is/was not defined so assumed to be a bug and should be LIGHT
+                NewProtocolMessageBody.packet(NewProtocolTags.LIGHT, Buffer.from([this.light ? 0x01 : 0x00])),
+            ]);
+        }
+        payload[0] = pack_count;
+        return payload;
+    }
+}
+class A1GeneralMessageBody extends MessageBody {
+    power;
+    mode;
+    fan_speed;
+    target_humidity;
+    child_lock;
+    filter_indicator;
+    anion;
+    sleep_mode;
+    pump;
+    defrosting;
+    tank_level;
+    tank_full;
+    water_level_set;
+    current_humidity;
+    current_temperature;
+    swing;
+    purifier;
+    constructor(body) {
+        super(body);
+        // byte1 - power
+        this.power = (body[1] & 0x01) > 0;
+        // byte2 - mode
+        this.mode = body[2] & 0x0f;
+        // byte3 - fan_speed
+        this.fan_speed = body[3] & 0x7f;
+        // byte7 - target_humidity (between 35% and 85%)
+        this.target_humidity = body[7] < 35 ? 35 : body[7] > 85 ? 85 : body[7];
+        // byte8 - child_lock
+        this.child_lock = (body[8] & 0x80) > 0;
+        // byte9 - filter_indicator, anion, sleep_mode, pump_enable, pump
+        this.filter_indicator = (body[9] & 0x80) > 0;
+        this.anion = (body[9] & 0x40) > 0;
+        this.sleep_mode = (body[9] & 0x20) > 0;
+        const pump_enable = (body[9] & 0x10) > 0;
+        const pump = (body[9] & 0x08) > 0;
+        this.pump = pump && pump_enable;
+        // byte10 - defrosting, tank_level
+        this.defrosting = (body[10] & 0x80) > 0;
+        this.tank_level = body[10] & 0x7f;
+        this.tank_full = this.tank_level >= 100;
+        // byte15 - water_level_set
+        this.water_level_set = body[15];
+        // byte16 - current_humidity
+        this.current_humidity = body[16];
+        // byte17 - current_temperature
+        this.current_temperature = (body[17] - 50) / 2;
+        // byte19 - swing (vertical or horizontal)
+        this.swing = (body[19] & 0x20) > 0;
+        // byte23 - purifier (if available)
+        this.purifier = body.length >= 24 ? body[23] & 0x01 : 0;
+        // Not sure the purpose of this fan speed check, but it is part of the original python code at
+        // https://github.com/georgezhao2010/midea_ac_lan/blob/master/custom_components/midea_ac_lan/midea/devices/a1/message.py
+        if (this.fan_speed < 5) {
+            this.fan_speed = 1;
+        }
+    }
+}
+class A1NewProtocolMessageBody extends NewProtocolMessageBody {
+    light = false;
+    constructor(body, body_type) {
+        super(body, body_type);
+        const params = this.parse();
+        if (NewProtocolTags.LIGHT in params) {
+            this.light = params[NewProtocolTags.LIGHT][0] > 0;
+        }
+    }
+}
+export class MessageA1Response extends MessageResponse {
+    message;
+    constructor(message) {
+        super(message);
+        this.message = message;
+        if ([MessageType.QUERY, MessageType.SET, MessageType.NOTIFY2].includes(this.message_type)) {
+            if ([0xb0, 0xb1, 0xb5].includes(this.body_type)) {
+                this.set_body(new A1NewProtocolMessageBody(this.body, this.body_type));
+            }
+            else {
+                this.set_body(new A1GeneralMessageBody(this.body));
+            }
+        }
+        else if (this.message_type === MessageType.NOTIFY2 && this.body_type === 0xa0) {
+            this.set_body(new A1GeneralMessageBody(this.body));
+        }
+    }
+}
+//# sourceMappingURL=MideaA1Message.js.map
