@@ -13,7 +13,7 @@ import type { Config, DeviceConfig } from '../platformUtils.js';
 import { type DeviceInfo, type DeviceType, ParseMessageResult, ProtocolVersion, TCPMessageType } from './MideaConstants.js';
 import { MessageQuerySubtype, MessageQuestCustom, type MessageRequest, MessageSubtypeResponse, MessageType } from './MideaMessage.js';
 import PacketBuilder from './MideaPacketBuilder.js';
-import { type KeyToken, LocalSecurity } from './MideaSecurity.js';
+import { type KeyToken, LocalSecurity, SIGN_MISMATCH_ERROR_MESSAGE } from './MideaSecurity.js';
 import { PromiseSocket } from './MideaUtils.js';
 
 export type DeviceAttributeBase = {
@@ -497,6 +497,20 @@ export default abstract class MideaDevice extends EventEmitter {
           }
         } catch (e) {
           const msg = e instanceof Error ? e.stack : e;
+          // Sign-mismatch indicates the V3 crypto state has desynced from the device
+          // (commonly seen after a transient network blip or a Homebridge restart that
+          // left the underlying socket in a bad state). The existing code path would
+          // log and keep looping with the same broken tcp_key, leaving the device
+          // unresponsive until the 2-minute heartbeat timeout. Force a clean reconnect
+          // instead — the outer loop's reconnect logic will perform a fresh handshake.
+          if (e instanceof Error && e.message === SIGN_MISMATCH_ERROR_MESSAGE) {
+            this.logger.warn(
+              `[${this.name} | run] Sign mismatch — V3 crypto state desynced. Resetting and forcing reconnect + re-handshake.`,
+            );
+            this.security.reset();
+            this.close_socket();
+            break;
+          }
           if (this.logRecoverableErrors) {
             this.logger.warn(`[${this.name} | run] Error reading from socket:\n${msg}`);
           } else {

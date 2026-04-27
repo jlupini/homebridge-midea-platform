@@ -9,6 +9,8 @@ function unescape_plus(str: string) {
 
 export type KeyToken = Buffer | undefined;
 
+export const SIGN_MISMATCH_ERROR_MESSAGE = 'Sign does not match';
+
 export abstract class CloudSecurity {
   protected readonly LOGIN_KEY: string;
   abstract readonly IS_PROXIED: boolean;
@@ -279,7 +281,7 @@ export class LocalSecurity {
           .digest()
           .compare(sign) !== 0
       ) {
-        throw new Error('Sign does not match');
+        throw new Error(SIGN_MISMATCH_ERROR_MESSAGE);
       }
       if (padding) {
         data = data.subarray(0, data.length - padding);
@@ -292,5 +294,13 @@ export class LocalSecurity {
       return [[data, ...packets], incomplete];
     }
     return [[data], leftover];
+  }
+
+  // Clears crypto state so a fresh handshake can rebuild it.
+  // Used on sign-mismatch recovery: see MideaDevice.run().
+  public reset() {
+    this.tcp_key = Buffer.alloc(0);
+    this.request_count = 0;
+    this.response_count = 0;
   }
 }
