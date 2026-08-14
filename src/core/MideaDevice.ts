@@ -146,8 +146,13 @@ export default abstract class MideaDevice extends EventEmitter {
     } catch (err) {
       const msg = err instanceof Error ? err.stack : err;
       this.logger.error(`[${this.name}] Failed to connect to device (${this.ip}:${this.port}):\n${msg}`);
-      // Do NOT start the run loop with a broken connection — clean up instead
+      // Clean up the broken socket, but still start the run loop: its reconnect
+      // path handles a destroyed socket by retrying every 5s with a fresh
+      // handshake. Without this, a failed initial connect is permanent —
+      // send_message_v3 drops every message before it reaches the socket, so
+      // nothing else can ever trigger a reconnect.
       this.close_socket();
+      this.open();
       return false;
     }
   }
